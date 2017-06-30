@@ -2,11 +2,11 @@
 title: "Proteomic consistency metrics -- Development Version"
 author: "Simina Boca, Shaojun Tang, Yi Bai, Nathan Edwards"
 date: '`r format(Sys.Date(), "%B %d, %Y")`'       # adding current date 
-runtime: shiny
 output:
   html_document:                                  
     toc: true                                     # table of content : true
     toc_depth: 3                                  # level of content table
+runtime: shiny
 ---
   
 ```{r setup, include=FALSE}

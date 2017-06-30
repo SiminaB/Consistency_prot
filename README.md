@@ -6,3 +6,5 @@ Directory structure:
 
 To render the html pages correctly, preprend the web address by http://htmlpreview.github.io/? , for example:
 http://htmlpreview.github.io/?https://github.com/SiminaB/Consistency_prot/blob/master/html%20report/consistency_report_release_version.html
+
+The web document for the development version can be found at https://siminaboca.shinyapps.io/consistency_report_development_version/
