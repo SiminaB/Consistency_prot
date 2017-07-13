@@ -1,4 +1,4 @@
-README file for consistency metrics for proteomics
+README file for consistency metrics for proteomics:
 
 Directory structure:
 *html report* includes: 
