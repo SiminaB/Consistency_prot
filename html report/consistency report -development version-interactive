@@ -1,0 +1,885 @@
+---
+title: "Proteomic consistency metrics -- Development Version(Interactive)"
+author: "Simina Boca, Shaojun Tang, Yi Bai, Nathan Edwards"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'       # adding current date 
+output:
+  html_document:                                  
+    toc: true                                     # table of content : true
+    toc_depth: 3                                  # level of content table
+runtime: shiny
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggvis)
+```
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(ggvis)
+library(RColorBrewer)
+options(warn = -1)
+```
+
+```{r, echo=FALSE, include=FALSE}
+##Read in metrics for individual analytical samples and fractions and check number of fractions and samples
+
+QCmetrics <- read.table("Compref_BI_Proteome_QCmetrics.tsv", header=TRUE, sep="\t")
+dim(QCmetrics)
+head(QCmetrics)
+```
+
+```{r, echo=FALSE, include=FALSE}
+##need to separate out the fractions if they are all equal to NA (this means they have not been pulled out before)
+if(sum(!is.na(QCmetrics$fractionNum)) == 0)
+{
+  analyticalBasenameSplit <- strsplit(as.character(QCmetrics$analyticalBasename),"_Fr_")
+  QCmetrics$analyticalBasename <- sapply(analyticalBasenameSplit, function(x){x[1]})
+  QCmetrics$fractionNum <- as.numeric(sapply(analyticalBasenameSplit, function(x){x[2]}))
+  unique(QCmetrics$fractionNum)
+  QCmetrics$fractionNum[is.na(QCmetrics$fractionNum)] <- 25
+}
+
+##Get the fractions (check they are 1-24):
+
+sort(unique(QCmetrics$fractionNum))
+length(unique(QCmetrics$fractionNum))
+
+QCmetrics$fractionNum[is.na(QCmetrics$fractionNum)] <- 25
+```
+
+```{r, echo=FALSE, include=FALSE}
+##Get the number of unique analytical samples
+
+analyticalSamples <- unique(QCmetrics$analyticalBasename)
+length(analyticalSamples)
+
+##Make sure the labels in spectrumBasename are unique
+
+length(unique(QCmetrics$spectrumBasename))
+```
+
+```{r, echo=FALSE, include=FALSE}
+##Change some column names to make things easier
+QCmetrics <- rename(QCmetrics,
+                    PrecursorIntensity.0 = minPrecursorIntensity,
+                    PrecursorIntensity.5 = PrecursorIntensity5perc,
+                    PrecursorIntensity.25 = PrecursorIntensity25perc,
+                    PrecursorIntensity.50 = PrecursorIntensity50perc,
+                    PrecursorIntensity.75 = PrecursorIntensity75perc,
+                    PrecursorIntensity.95 = PrecursorIntensity95perc,
+                    PrecursorIntensity.100 = maxPrecursorIntensity)
+QCmetrics <- rename(QCmetrics,
+                    PrecursorMZ.0 = minPrecursorMZ,
+                    PrecursorMZ.5 = PrecursorMZ5perc,
+                    PrecursorMZ.25 = PrecursorMZ25perc,
+                    PrecursorMZ.50 = PrecursorMZ50perc,
+                    PrecursorMZ.75 = PrecursorMZ75perc,
+                    PrecursorMZ.95 = PrecursorMZ95perc,
+                    PrecursorMZ.100 = maxPrecursorMZ)
+
+QCmetrics <- rename(QCmetrics,
+                    PrecursorMW.0 = minPrecursorMW,
+                    PrecursorMW.5 = PrecursorMW5perc,
+                    PrecursorMW.25 = PrecursorMW25perc,
+                    PrecursorMW.50 = PrecursorMW50perc,
+                    PrecursorMW.75 = PrecursorMW75perc,
+                    PrecursorMW.95 = PrecursorMW95perc,
+                    PrecursorMW.100 = maxPrecursorMW)
+
+QCmetrics <- rename(QCmetrics,
+                    MS2perMS.0 = minMS2perMS,
+                    MS2perMS.5 = MS2perMS5perc,
+                    MS2perMS.25 = MS2perMS25perc,
+                    MS2perMS.50 = MS2perMS50perc,
+                    MS2perMS.75 = MS2perMS75perc,
+                    MS2perMS.95 = MS2perMS95perc,
+                    MS2perMS.100 = maxMS2perMS)
+
+QCmetrics <- rename(QCmetrics,
+                    MS2Charge.1.toCharge2Ratio = MS2Charge1toCharge2Ratio,
+                    MS2Charge.3.toCharge2Ratio = MS2Charge3toCharge2Ratio,
+                    MS2Charge.4.toCharge2Ratio = MS2Charge4toCharge2Ratio)
+
+
+##Create data frame melting the precursor intensities
+QCmetricsLongPrecInt <- melt(QCmetrics[,c(2,3,grep("PrecursorIntensity.",colnames(QCmetrics)))],
+                             variable.name="PrecursorIntensity",
+                             value.name="value",
+                             id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecInt)
+QCmetricsLongPrecInt <- cbind(QCmetricsLongPrecInt[,1:2],
+                              colsplit(QCmetricsLongPrecInt[,3], "\\.",
+                                       c("PrecursorIntensity","Percentile")),
+                              QCmetricsLongPrecInt[,4])
+head(QCmetricsLongPrecInt)
+colnames(QCmetricsLongPrecInt)[5] <- "value"
+
+##Create data frame melting the precursor MZ values
+QCmetricsLongPrecMZ <- melt(QCmetrics[,c(2,3,grep("PrecursorMZ.",colnames(QCmetrics)))],
+                            variable.name="PrecursorMZ",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecMZ)
+QCmetricsLongPrecMZ <- cbind(QCmetricsLongPrecMZ[,1:2],
+                             colsplit(QCmetricsLongPrecMZ[,3], "\\.",
+                                      c("PrecursorMZ","Percentile")),
+                             QCmetricsLongPrecMZ[,4])
+head(QCmetricsLongPrecMZ)
+colnames(QCmetricsLongPrecMZ)[5] <- "value"
+
+##Create data frame melting the precursor MW values
+QCmetricsLongPrecMW <- melt(QCmetrics[,c(2,3,grep("PrecursorMW.",colnames(QCmetrics)))],
+                            variable.name="PrecursorMW",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecMW)
+QCmetricsLongPrecMW <- cbind(QCmetricsLongPrecMW[,1:2],
+                             colsplit(QCmetricsLongPrecMW[,3], "\\.",
+                                      c("PrecursorMW","Percentile")),
+                             QCmetricsLongPrecMW[,4])
+head(QCmetricsLongPrecMW)
+colnames(QCmetricsLongPrecMW)[5] <- "value"
+
+
+##Create data frame melting the MS2perMS values
+QCmetricsLongMS2perMS <- melt(QCmetrics[,c(2,3,grep("MS2perMS.",colnames(QCmetrics)))],
+                            variable.name=" MS2perMS",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongMS2perMS)
+QCmetricsLongMS2perMS <- cbind(QCmetricsLongMS2perMS[,1:2],
+                             colsplit(QCmetricsLongMS2perMS[,3], "\\.",
+                                      c("MS2perMS","Percentile")),
+                             QCmetricsLongMS2perMS[,4])
+head(QCmetricsLongMS2perMS)
+colnames(QCmetricsLongMS2perMS)[5] <- "value"
+
+##Create data frame melting MS2 charge ratio
+QCmetricsLongMS2ChargeRatio <- melt(QCmetrics[,c(2,3,grep("MS2Charge.",colnames(QCmetrics)))],
+                            variable.name=" MS2ChargeRatio",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongMS2ChargeRatio)
+QCmetricsLongMS2ChargeRatio <- cbind(QCmetricsLongMS2ChargeRatio[,1:2],
+                             colsplit(QCmetricsLongMS2ChargeRatio[,3], "\\.",
+                                      c("MS2charge","ChargeState","toCharge2ratio")),
+                             QCmetricsLongMS2ChargeRatio[,4])
+head(QCmetricsLongMS2ChargeRatio)
+colnames(QCmetricsLongMS2ChargeRatio)[6] <- "value"
+
+```
+
+```{r, echo = FALSE}
+# generating a color Palettes for ggvis 
+# plotColorPalettes is the function for generating the pallettes, the colors in the palettes depends on the number we put in 
+# in our case, the palettes is called plotcolor
+
+plotColorPalettes <- function(g){
+  d <- 360/g
+  h <- cumsum(c(15, rep(d,g - 1)))
+  hcl(h = h, c = 100, l = 65)
+}
+plotcolor <- plotColorPalettes(length(analyticalSamples)) # the number of colors is the same as how many analytical smples in the data. 
+```
+
+
+## Number of MS2 spectra
+### Per sample, across fraction (boxplot)
+
+```{r, echo=FALSE, fig.height=8, fig.width=6}
+##Get boxplot of number of spectra across fractions
+g <- ggplot(QCmetrics, aes(y=numofMS2, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle("Number of MS2 spectra across fractions\nEach analytical sample is a different color") +
+  xlab("Analytical sample") + ylab("Number of spectra") +
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+ 
+  
+### Per sample, across fraction (interactive boxplot)
+```{r, echo = FALSE, fig.height=8, fig.width=7}
+
+#adding a keys column to the QC table to access the key
+QC1 <- QCmetrics
+QC1$id <- 1:nrow(QC1)
+
+showSamps <- function(x){if(is.null(x)) return(NULL);
+  row <- QC1[QC1$id == x$id,]
+  paste0("Analytical sample:", format(row[2])," ", "Fraction:",format(row[3]))}
+QC1 %>%
+  ggvis(x= ~as.numeric(analyticalBasename), y= ~numofMS2, opacity:=0.6,fill=~analyticalBasename) %>%
+  #layer_model_predictions(model='loess') %>%
+  add_tooltip(showSamps, "click") %>%
+  layer_boxplots() %>%
+  layer_points(key := ~ id) %>%
+  add_axis("x", title = "Analytical sample", title_offset = 77, values =  seq(as.character(analyticalSamples)), 
+           properties = axis_props(labels=list(angle=90, align = "left", baseline = "middle"))) %>%
+  add_axis("y", title = "Number of MS2 spectra", title_offset = 90) %>% 
+  hide_legend("fill") %>%
+  scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)])
+```
+
+<a href="#top">Back to top</a>
+  
+  
+### Per sample, versus fraction (scatterplot)
+```{r, echo=FALSE, fig.width=10, fig.height=6}
+g <- ggplot(QCmetrics, aes(y=numofMS2, x=fractionNum, col=analyticalBasename)) +
+  geom_point() +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  stat_smooth(method="loess", fill="grey50", size=0)+##, color="grey50") +
+  ##geom_line() +
+  ggtitle("Number of MS2 spectra versus fraction\nEach analytical sample is a different color") +
+  xlab("Fraction") + ylab("Number of spectra") 
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+  
+  
+  
+### Number of MS2 spectra versus fraction (boxplot)
+```{r, echo=FALSE, fig.width=10, fig.height=6}
+ggplot(QCmetrics, aes(y=numofMS2, x=factor(fractionNum))) +
+  geom_point(aes(col=analyticalBasename)) +
+  stat_smooth(aes(y=numofMS2, x=fractionNum, col=analyticalBasename),method="loess", fill="grey50", size=0)+##, color="grey50") +
+  geom_boxplot(outlier.size=NA) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  ggtitle("Number of MS2 spectra versus fraction\nEach analytical sample is a different color") +
+  xlab("Fraction") + ylab("Number of spectra") 
+```
+
+<a href="#top">Back to top</a>
+  
+
+## Precursor intensity values
+### Range of Precursor intensity values
+This table shows the range of the precursor intensity for each percentile, as a summary and to see if there are any value of 0 that cannot be log-trnasformed.
+
+```{r, echo = FALSE}
+B = c(5,25,50,75,95)
+
+rangetable = matrix(,nrow = 2, ncol = length(B), byrow = TRUE)
+for (i in 1:length(B)){
+  rangesub <-subset(QCmetricsLongPrecInt, QCmetricsLongPrecInt$Percentile == B[i])
+  # filter to get only the wanted percentile
+  rangetable[1,i] <- toString(round(range(rangesub$value),2))
+  rangetable[2,i] <- toString(signif(log10(range(rangesub$value)),3))
+}
+colnames(rangetable)<-c("5th Perc","25th perc","50th perc","75th perc","95th perc")
+rownames(rangetable)<-c("range", "range of log10 transformed")
+kable(rangetable) 
+```
+
+<a href="#top">Back to top</a>
+  
+  
+###Per sample, versus fraction (scatterplot)
+```{r, echo=FALSE, fig.width=10, fig.height=6}
+Pmin <- log10(min(QCmetricsLongPrecInt$value[QCmetricsLongPrecInt$value > 0]))
+Pmax <- log10(max(QCmetricsLongPrecInt$value))
+
+QCmetricsLongPrecInt$value2 <- QCmetricsLongPrecInt$value
+QCmetricsLongPrecInt$value2[QCmetricsLongPrecInt$value2 == 0] <-
+  min(QCmetricsLongPrecInt$value2[QCmetricsLongPrecInt$value2 > 0])*0.5
+
+g <- ggplot(QCmetricsLongPrecInt[QCmetricsLongPrecInt$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=log10(value2), x=fractionNum, col=analyticalBasename, group=analyticalBasename)) + 
+  facet_grid(~ Percentile) +
+  geom_point() +
+  ylim(c(Pmin, Pmax)) +
+  ##geom_line() +
+  ##geom_smooth() +
+  ggtitle("5%,25%,50%,75%,95% for precursor intensity\nEach analytical sample is a different color\nEach panel is a percentile") +
+  xlab("Fraction") + ylab("log10(Precursor intensity)") + 
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample")
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+ 
+  
+### Per sample, versus fraction (interactive scatterplot)
+```{r, echo = FALSE}
+shinyApp(
+  ui = fluidPage(
+    h4("5%,25%,50%,75%,95% for precursor intensity"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput("percentile", "Percentile:", 
+                    choices=c(5,25,50,75,95),
+                    selected = 50),
+        tags$hr(),
+        helpText("Each analytical sample is a different color")
+      ),
+      mainPanel(
+        ggvisOutput("PrecursorInt"),
+        uiOutput("PrecursorInt_ui")
+      )
+    )
+  ),
+  
+  server = function(input, output){
+    
+    QCmetricsLong <- reactive({
+      QC2 <- QCmetricsLongPrecInt[QCmetricsLongPrecInt$Percentile %in% c(5,25,50,75,95),]
+      
+      QC2 <- QC2[QC2$Percentile %in% c(input$percentile),]
+
+    })
+    
+    observe({
+      
+      QC2 <- as.data.frame(QCmetricsLong())  
+      QC2$keys = 1:nrow(QC2)
+      
+      
+      showSamps <- function(x){if(is.null(x)) return(NULL);
+      row <- QC2[QC2$keys == x$keys,]
+      paste0("Analytical sample:", format(row[1])," ", "Fraction:",format(row[2]))}
+      
+      QC2 %>%
+        ggvis(~fractionNum, ~log10(value2),fill=~analyticalBasename) %>%
+        layer_model_predictions(model='loess') %>%
+        add_tooltip(html=showSamps, on="click") %>%
+        layer_points(key := ~ keys) %>%
+        add_axis("x", title = "Fraction") %>% 
+        add_axis("y", title = "log10(Precursor intensity)") %>% 
+        hide_legend("fill") %>%
+        scale_numeric("y", domain = c(Pmin,Pmax)) %>%
+        scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)]) %>%
+        bind_shiny("PrecursorInt","PrecursorInt_ui")
+    })
+    
+  }
+  
+)
+```
+
+<a href="#top">Back to top</a>
+  
+  
+### Percentage of 0 precursor intensities at different percentiles
+In this table, each row represents a fraction and each column represents a percentile. Each value represents the percent of samples that have a precursor intensity of 0 at that fraction and that percentile.
+```{r,echo = FALSE}
+# This table indicates the percente of 0 in the value column
+
+#generate a dataframe contians only the precInt is 0
+QCPrecIntof0 <- subset(QCmetricsLongPrecInt, QCmetricsLongPrecInt$value == 0)
+
+#generate the dataframe where the rows are different fractions and the columns are different percentile
+A=c(1:25)
+B=c(5,25,50,75,95)
+QCPrecIntTable=matrix(,nrow = length(A), ncol = length(B))
+for (i in 1:length(A)){
+  for (j in 1:length(B)){
+    QCPrecIntTable[i,j]<-round(length(which(QCPrecIntof0$Percentile == B[j] & QCPrecIntof0$fractionNum == i))/length(which(QCmetricsLongPrecInt$fractionNum == i & QCmetricsLongPrecInt$Percentile == B[j]))*100, 3)
+  }
+}
+colnames(QCPrecIntTable) <- c("5th Perc", "25th Perc", "50th Perc", "75th Perc","95th Perc")
+rownames(QCPrecIntTable) <- c(paste0("fraction", c(1:25)))
+kable(QCPrecIntTable)
+
+```
+
+<a href="#top">Back to top</a>
+  
+  
+## Precursor m/z values
+### Per sample, versus fraction (scatterplot)
+  
+```{r, echo=FALSE, fig.width=10, fig.height=6}
+g <- ggplot(QCmetricsLongPrecMZ[QCmetricsLongPrecMZ$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_point() +
+  ##geom_line() +
+  ##geom_smooth() +
+  ggtitle("5%,25%,50%,75%,95% for precursor m/z\nEach analytical sample is a different color\nEach panel is a percentile") +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Precursor m/z")
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+  
+  
+### Per sample, versus fraction (interactive scatterplot)
+```{r, echo = FALSE, fig.width=10, fig.height=10}
+shinyApp(
+  ui = fluidPage(
+    h4("5%,25%,50%,75%,95% for precursor m/z"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput("percentile", "Percentile:", 
+                    choices=c(5,25,50,75,95),
+                    selected = 50),
+        tags$hr(), 
+        helpText("Each analytical sample is a different color")
+      ),
+      mainPanel(
+        ggvisOutput("PrecursorMZ"),
+        uiOutput("PrecursorMZ_ui")
+      )
+    )
+  ),
+  
+  server = function(input, output){
+    
+    QCmetricsLong <- reactive({
+      QC3 <- QCmetricsLongPrecMZ [QCmetricsLongPrecMZ $Percentile %in% c(5,25,50,75,95),]
+      
+      QC3 <- QC3[QC3$Percentile %in% c(input$percentile),]
+    })
+    
+    observe({
+      
+      QC3 <- as.data.frame(QCmetricsLong())  
+      QC3$keys = 1:nrow(QC3)
+      
+      
+      showSamps <- function(x){if(is.null(x)) return(NULL);
+        row <- QC3[QC3$keys == x$keys,]
+      paste0("Analytical sample:", format(row[1])," ", "Fraction:",format(row[2]))}
+      
+      QC3 %>%
+        ggvis(~fractionNum, ~value,fill=~analyticalBasename) %>%
+        layer_model_predictions(model='loess') %>%
+        add_tooltip(html=showSamps, on="click") %>%
+        layer_points(key := ~ keys) %>%
+        add_axis("x", title = "Fraction") %>% 
+        add_axis("y", title = "Precursor M/Z", title_offset = 50) %>% 
+        hide_legend("fill") %>%
+        scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)]) %>%
+        bind_shiny("PrecursorMZ","PrecursorMZ_ui")
+    })
+    
+  }
+  
+)
+```
+
+<a href="#top">Back to top</a>
+
+
+## Precursor molecular weight (MW) values
+### Per sample, versus fraction (scatterplot)
+```{r, echo=FALSE, fig.width=10, fig.height=6}
+g <- ggplot(QCmetricsLongPrecMW[QCmetricsLongPrecMW$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_point() +
+  ##geom_line() +
+  ##geom_smooth() +
+  ggtitle("5%,25%,50%,75%,95% for precursor molecular weight\nEach analytical sample is a different color\nEach panel is a percentile") +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Precursor Molecular Weight")
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, versus fraction (interactive scatterplot)
+```{r, echo = FALSE, fig.width=10, fig.height=10}
+shinyApp(
+  ui = fluidPage(
+     h4("5%,25%,50%,75%,95% for precursor molecular weight"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput("percentile", "Percentile:", 
+                    choices=c(5,25,50,75,95),
+                    selected = 50),
+        tags$hr(),
+        helpText("Each analytical sample is a different color")
+      ),
+      mainPanel(
+        ggvisOutput("PrecursorMW"),
+        uiOutput("PrecursorMW_ui")
+      )
+    )
+  ),
+  
+  server = function(input, output){
+    
+    QCmetricsLong <- reactive({
+      QC4 <- QCmetricsLongPrecMW [QCmetricsLongPrecMW $Percentile %in% c(5,25,50,75,95),]
+      
+      QC4 <- QC4[QC4$Percentile %in% c(input$percentile),]
+    })
+    
+    observe({
+      
+      QC4 <- as.data.frame(QCmetricsLong())  
+      QC4$keys = 1:nrow(QC4)
+      
+      
+      showSamps <- function(x){if(is.null(x)) return(NULL);
+        row <- QC4[QC4$keys == x$keys,]
+      paste0("Analytical sample:", format(row[1])," ", "Fraction:",format(row[2]))}
+      
+      QC4 %>%
+        ggvis(~fractionNum, ~value,fill=~analyticalBasename) %>%
+        layer_model_predictions(model='loess') %>%
+        add_tooltip(html=showSamps, on="click") %>%
+        layer_points(key := ~ keys) %>%
+        add_axis("x", title = "Fraction") %>% 
+        add_axis("y", title = "Precursor Molecular Weight", title_offset = 50) %>% 
+        hide_legend("fill") %>%
+        scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)]) %>%
+        bind_shiny("PrecursorMW","PrecursorMW_ui")
+    })
+    
+  }
+  
+)
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, across fraction at 50 percentile (boxplot)
+```{r, echo=FALSE, fig.height=8, fig.width=6}
+##Get boxplot of number of spectra across fractions
+g <- ggplot(QCmetricsLongPrecMW[QCmetricsLongPrecMW$Percentile %in% c(50),], aes(y=value, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle("Molecular weight at the 50 percentile across fractions\nEach analytical sample is a different color") +
+  xlab("Analytical sample") + ylab("Precursor Molecular Weight") +
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, across fraction at 50 percentile (interactive boxplot)
+```{r, echo = FALSE}
+
+#adding a keys column to the QC table to access the key
+QC5 <- QCmetricsLongPrecMW[QCmetricsLongPrecMW$Percentile %in% c(50),]
+QC5$id <- 1:nrow(QC5)
+
+showSamps <- function(x){if(is.null(x)) return(NULL);
+  row <- QC5[QC5$id == x$id,]
+  paste0("Analytical sample:", format(row[1])," ", "Fraction:",format(row[2]))}
+
+QC5 %>%
+  ggvis(x= ~as.numeric(analyticalBasename), y= ~value, opacity:=0.5,fill=~analyticalBasename) %>%
+  #layer_model_predictions(model='loess') %>%
+  add_tooltip(showSamps, "click") %>%
+  layer_boxplots() %>%
+  layer_points(key := ~ id) %>%
+  add_axis("x", title = "Analytical sample", title_offset = 77, values =  seq(as.character(analyticalSamples)), 
+           properties = axis_props(labels=list(angle=90, align = "left", baseline = "middle"))) %>%
+  add_axis("y", title = "Precursor Molecular Weight", title_offset = 90) %>% 
+  hide_legend("fill") %>%
+  scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)])
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, across fraction (boxplot)
+```{r, echo=FALSE, fig.width=10, fig.height= 8}
+g <- ggplot(QCmetricsLongPrecMW[QCmetricsLongPrecMW$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=analyticalBasename, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_boxplot () +
+  ##geom_line() +
+  ##geom_smooth() +
+  ggtitle("5%,25%,50%,75%,95% for precursor molecular weight\nEach analytical sample is a different color\nEach panel is a percentile") +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Precursor Molecular Weight") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5)) +
+  theme(legend.position="top")
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+
+### Per sample, across fraction (interactive box)
+```{r, echo = FALSE, fig.width=10, fig.height=10}
+shinyApp(
+  ui = fluidPage(
+    h4("5%,25%,50%,75%,95% for precursor molecular weight"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput("percentile", "Percentile:", 
+                    choices=c(5,25,50,75,95),
+                    selected = 50),
+        tags$hr(),
+        helpText("Each analytical sample is a different color")
+      ),
+      mainPanel(
+        ggvisOutput("PrecursorMW_box"),
+        uiOutput("PrecursorMW_box_ui")
+      )
+    )
+  ),
+  
+  server = function(input, output){
+    
+    QCmetricsLong <- reactive({
+      QC6 <- QCmetricsLongPrecMW[QCmetricsLongPrecMW$Percentile %in% c(5,25,50,75,95),]
+      
+      QC6 <- QC6[QC6$Percentile %in% c(input$percentile),]
+    })
+    
+    observe({
+      
+      QC6 <- as.data.frame(QCmetricsLong())  
+      QC6$keys = 1:nrow(QC6)
+      
+      
+      showSamps <- function(x){if(is.null(x)) return(NULL);
+        row <- QC6[QC6$keys == x$keys,]
+      paste0("Analytical sample:", format(row[1])," ", "Fraction:",format(row[2]))}
+      
+      QC6 %>%
+        ggvis(x= ~as.numeric(analyticalBasename), y= ~value, fill=~analyticalBasename, opacity:=0.5) %>%
+        add_tooltip(html=showSamps, on="click") %>%
+        layer_boxplots() %>%
+        layer_points(key := ~ keys) %>%
+        add_axis("x", title = "Analytical sample", title_offset = 77, values =  seq(as.character(analyticalSamples)), 
+           properties = axis_props(labels=list(angle=90, align = "left", baseline = "middle"))) %>%
+       add_axis("y", title = "Precursor Molecular Weight", title_offset = 90) %>% 
+       hide_legend("fill") %>%
+       scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)]) %>%
+       bind_shiny("PrecursorMW_box","PrecursorMW_box_ui")
+    })
+    
+  }
+  
+)
+```
+
+<a href="#top">Back to top</a>
+
+
+## MS2 per MS values
+### Per sample, versus fraction (scatterplot)
+```{r, echo=FALSE, fig.width=10, fig.height=6}
+g <- ggplot(QCmetricsLongMS2perMS[QCmetricsLongMS2perMS$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_point(alpha = 0.8) +
+  geom_line() +
+  ##geom_smooth(method = loess, span = 0.3) +
+  ggtitle("5%,25%,50%,75%,95% for MS2 per MS values\nEach analytical sample is a different color\nEach panel is a percentile") +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("MS2perMS value") +
+  theme(legend.position="top")
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, versus fraction (interactive scatterplot)
+```{r, echo = FALSE, fig.width=10, fig.height=10}
+shinyApp(
+  ui = fluidPage(
+    h4("5%,25%,50%,75%,95% for MS2 per MS value"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput("percentile", "Percentile:", 
+                    choices=c(5,25,50,75,95),
+                    selected = 50),
+        tags$hr(),
+        helpText("Each analytical sample is a different color")
+      ),
+      mainPanel(
+        ggvisOutput("PrecursorMS2perMS"),
+        uiOutput("PrecursorMS2perMS_ui")
+      )
+    )
+  ),
+  
+  server = function(input, output){
+    
+    QCmetricsLong <- reactive({
+      QC7 <- QCmetricsLongMS2perMS [QCmetricsLongMS2perMS$Percentile %in% c(5,25,50,75,95),]
+      
+      QC7 <- QC7[QC7$Percentile %in% c(input$percentile),]
+    })
+    
+    observe({
+      
+      QC7 <- as.data.frame(QCmetricsLong())  
+      QC7$keys = 1:nrow(QC7)
+      
+      
+      showSamps <- function(x){if(is.null(x)) return(NULL);
+        row <- QC7[QC7$keys == x$keys,]
+      paste0("Analytical sample:", format(row[1])," ", "Fraction:",format(row[2]))}
+      
+      QC7 %>%
+        ggvis(~fractionNum, ~value, stroke =~ analyticalBasename, opacity :=0.7) %>%
+       ## layer_model_predictions( model = "loess") %>%
+        add_tooltip(html=showSamps, on="click") %>%
+        layer_lines() %>%
+        layer_points(fill = ~analyticalBasename, key := ~ keys) %>%
+        add_axis("x", title = "Fraction") %>% 
+        add_axis("y", title = "Precursor Molecular Weight", title_offset = 50) %>% 
+        scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)]) %>%
+        scale_nominal("stroke", range = plotcolor[1:length(analyticalSamples)]) %>%
+        hide_legend("fill") %>%
+        hide_legend("stroke") %>%
+        bind_shiny("PrecursorMS2perMS","PrecursorMS2perMS_ui")
+    })
+    
+  }
+  
+)
+```
+
+<a href="#top">Back to top</a>
+
+
+## Different MS2 charge state to MS2 charge 2 ratio
+### Per sample, versus fraction (scatterplot)
+```{r, echo=FALSE, fig.width=10, fig.height=6}
+g <- ggplot(QCmetricsLongMS2ChargeRatio[QCmetricsLongMS2ChargeRatio$ChargeState %in% c(1,3,4),], 
+            aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ ChargeState) +
+  geom_point() +
+  ##geom_line() +
+  ##geom_smooth() +
+  ggtitle("MS2 charge1,3,4 to MS2 charge2 ratio\nEach analytical sample is a different color\nEach panel is a different MS2 charge state") +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Charge Ratio") +
+  ylim(0,max(QCmetricsLongMS2ChargeRatio$value)+0.5)
+if(length(analyticalSamples)<=10)
+{
+  g
+} else {
+  g + theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, versus fraction (interactive scatterplot)
+```{r, echo = FALSE, fig.width=10, fig.height=10}
+shinyApp(
+  ui = fluidPage(
+    h4("MS2 charge 1,3,4 to MS2 charge 2 ratio"),
+    sidebarLayout(
+      sidebarPanel(
+        selectInput("ChargeState", "MS2 Charge State:", 
+                    choices=c(1,3,4),
+                    selected = 4),
+        tags$hr(),
+        helpText("Each analytical sample is a different color")
+      ),
+      mainPanel(
+        ggvisOutput("MS2ChargeRatio"),
+        uiOutput("MS2ChargeRatio_ui")
+      )
+    )
+  ),
+  
+  server = function(input, output){
+    
+    QCmetricsLong <- reactive({
+      QC8 <- QCmetricsLongMS2ChargeRatio[QCmetricsLongMS2ChargeRatio$ChargeState %in% c(1,3,4),]
+      
+      QC8 <- QC8[QC8$ChargeState %in% c(input$ChargeState),]
+      
+    })
+    
+    observe({
+      
+      QC8 <- as.data.frame(QCmetricsLong())  
+      QC8$keys = 1:nrow(QC8)
+      
+      
+      showSamps <- function(x){if(is.null(x)) return(NULL);
+      row <- QC8[QC8$keys == x$keys,]
+      paste0("Analytical sample:", format(row[1])," ", "Fraction:",format(row[2]))}
+      
+      QC8 %>%
+        ggvis(~fractionNum, ~value,fill=~analyticalBasename) %>%
+        layer_model_predictions(model='loess') %>%
+        add_tooltip(html=showSamps, on="click") %>%
+        layer_points(key := ~ keys) %>%
+        add_axis("x", title = "Fraction") %>% 
+        add_axis("y", title = "To MS2 Charge2 Ratio", title_offset = 50) %>% 
+        hide_legend("fill") %>%
+        scale_nominal("fill", range = plotcolor[1:length(analyticalSamples)]) %>%
+        bind_shiny("MS2ChargeRatio","MS2ChargeRatio_ui")
+    })
+    
+  }
+  
+)
+```
+
+<a href="#top">Back to top</a>
+
+
+## Data file 
+We used the "Compref_BI_Proteome_QCmetrics.tsv" data file in this report.
+To see the data file in tsv format, please click 
+<a href="./Compref_BI_Proteome_QCmetrics.tsv" target="_blank"><b>Here</b></a>
+
+
+<a href="#top">Back to top</a>
+
+
+## PDF file 
+
+
