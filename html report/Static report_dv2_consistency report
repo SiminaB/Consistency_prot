@@ -1,0 +1,1154 @@
+---
+title: "Proteomic consistency metrics -- Development Version with static metrics"
+author: "Simina Boca, Shaojun Tang, Yi Bai, Nathan Edwards"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, warning=FALSE, include=FALSE}
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(RColorBrewer)
+library(grid)
+library(gridExtra)  ## to show the plots side by side 
+library(pander)      ## this package is used ot convert the .md file into PDF
+options(warn = -1)
+options(knitr.table.format = "html")  # this allows the kable function work in html format
+```
+
+```{r,include=FALSE}
+##Read in metrics for individual analytical samples and fractions and check number of fractions and samples
+
+QCmetrics <- read.table("CompRefBI_mzml_metricInfo_all_id.07272017.tsv", header=TRUE, sep="\t")
+dim(QCmetrics)
+head(QCmetrics)
+```
+
+```{r,include=FALSE}
+##need to separate out the fractions if they are all equal to NA (this means they have not been pulled out before)
+if(sum(!is.na(QCmetrics$fractionNum)) == 0)
+{
+  analyticalBasenameSplit <- strsplit(as.character(QCmetrics$analyticalBasename),"_Fr_")
+  QCmetrics$analyticalBasename <- sapply(analyticalBasenameSplit, function(x){x[1]})
+  QCmetrics$fractionNum <- as.numeric(sapply(analyticalBasenameSplit, function(x){x[2]}))
+  unique(QCmetrics$fractionNum)
+  QCmetrics$fractionNum[is.na(QCmetrics$fractionNum)] <- 25
+}
+
+##Get the fractions (check they are 1-24):
+
+sort(unique(QCmetrics$fractionNum))
+length(unique(QCmetrics$fractionNum))
+
+QCmetrics$fractionNum[is.na(QCmetrics$fractionNum)] <- 25
+```
+
+```{r, include=FALSE}
+##Get the number of unique analytical samples
+
+analyticalSamples <- unique(QCmetrics$analyticalBasename)
+length(analyticalSamples)
+
+##Make sure the labels in spectrumBasename are unique
+
+length(unique(QCmetrics$spectrumBasename))
+```
+
+```{r,include=FALSE}
+##Change some column names to make things easier
+QCmetrics <- rename(QCmetrics,
+                    PrecursorIntensityALL.0 = minPrecursorIntensity_ALL,
+                    PrecursorIntensityALL.5 = PrecursorIntensity5perc_ALL,
+                    PrecursorIntensityALL.25 = PrecursorIntensity25perc_ALL,
+                    PrecursorIntensityALL.50 = PrecursorIntensity50perc_ALL,
+                    PrecursorIntensityALL.75 = PrecursorIntensity75perc_ALL,
+                    PrecursorIntensityALL.95 = PrecursorIntensity95perc_ALL,
+                    PrecursorIntensityALL.100 = maxPrecursorIntensity_ALL)
+QCmetrics <- rename(QCmetrics,
+                    PrecursorMZALL.0 = minPrecursorMZ_ALL,
+                    PrecursorMZALL.5 = PrecursorMZ5perc_ALL,
+                    PrecursorMZALL.25 = PrecursorMZ25perc_ALL,
+                    PrecursorMZALL.50 = PrecursorMZ50perc_ALL,
+                    PrecursorMZALL.75 = PrecursorMZ75perc_ALL,
+                    PrecursorMZALL.95 = PrecursorMZ95perc_ALL,
+                    PrecursorMZALL.100 = maxPrecursorMZ_ALL)
+
+QCmetrics <- rename(QCmetrics,
+                    PrecursorMWALL.0 = minPrecursorMW_ALL,
+                    PrecursorMWALL.5 = PrecursorMW5perc_ALL,
+                    PrecursorMWALL.25 = PrecursorMW25perc_ALL,
+                    PrecursorMWALL.50 = PrecursorMW50perc_ALL,
+                    PrecursorMWALL.75 = PrecursorMW75perc_ALL,
+                    PrecursorMWALL.95 = PrecursorMW95perc_ALL,
+                    PrecursorMWALL.100 = maxPrecursorMW_ALL)
+
+QCmetrics <- rename(QCmetrics,
+                    MS2perMS1ALL.0 = minMS2perMS1_ALL,
+                    MS2perMS1ALL.5 = MS2perMS1_5perc_ALL,
+                    MS2perMS1ALL.25 = MS2perMS1_25perc_ALL,
+                    MS2perMS1ALL.50 = MS2perMS1_50perc_ALL,
+                    MS2perMS1ALL.75 = MS2perMS1_75perc_ALL,
+                    MS2perMS1ALL.95 = MS2perMS1_95perc_ALL,
+                    MS2perMS1ALL.100 = maxMS2perMS1_ALL)
+### Calculate the chareg state ratio and added in QCmetrics
+QCmetrics$MS2ChargeALL.1.toCharge2Ratio<- c(QCmetrics$MS2Charge1_ALL/QCmetrics$MS2Charge2_ALL)
+QCmetrics$MS2ChargeALL.2.toCharge2Ratio<- with(QCmetrics, MS2Charge2_ALL/MS2Charge2_ALL)
+QCmetrics$MS2ChargeALL.3.toCharge2Ratio<- with(QCmetrics, MS2Charge3_ALL/MS2Charge2_ALL)
+QCmetrics$MS2ChargeALL.4.toCharge2Ratio<- with(QCmetrics, MS2Charge4_ALL/MS2Charge2_ALL)
+QCmetrics$MS2ChargeALL.5andhigher.toCharge2Ratio<- with(QCmetrics, MS2Charge5andHigher_ALL/MS2Charge2_ALL)
+
+
+##Create data frame melting the precursor intensities
+QCmetricsLongPrecInt_ALL <- melt(QCmetrics[,c(2,3,grep("PrecursorIntensityALL.",colnames(QCmetrics)))],
+                             variable.name="PrecursorIntensityALL",
+                             value.name="value",
+                             id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecInt_ALL)
+QCmetricsLongPrecInt_ALL <- cbind(QCmetricsLongPrecInt_ALL[,1:2],
+                              colsplit(QCmetricsLongPrecInt_ALL[,3], "\\.",
+                                       c("PrecursorIntensityALL","Percentile")),
+                              QCmetricsLongPrecInt_ALL[,4])
+head(QCmetricsLongPrecInt_ALL)
+colnames(QCmetricsLongPrecInt_ALL)[5] <- "value"
+
+##Create data frame melting the precursor MZ values
+QCmetricsLongPrecMZ_ALL <- melt(QCmetrics[,c(2,3,grep("PrecursorMZALL.",colnames(QCmetrics)))],
+                            variable.name="PrecursorMZALL",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecMZ_ALL)
+QCmetricsLongPrecMZ_ALL <- cbind(QCmetricsLongPrecMZ_ALL[,1:2],
+                             colsplit(QCmetricsLongPrecMZ_ALL[,3], "\\.",
+                                      c("PrecursorMZALL","Percentile")),
+                             QCmetricsLongPrecMZ_ALL[,4])
+head(QCmetricsLongPrecMZ_ALL)
+colnames(QCmetricsLongPrecMZ_ALL)[5] <- "value"
+
+##Create data frame melting the precursor MW values
+QCmetricsLongPrecMW_ALL <- melt(QCmetrics[,c(2,3,grep("PrecursorMWALL.",colnames(QCmetrics)))],
+                            variable.name="PrecursorMWALL",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecMW_ALL)
+QCmetricsLongPrecMW_ALL <- cbind(QCmetricsLongPrecMW_ALL[,1:2],
+                             colsplit(QCmetricsLongPrecMW_ALL[,3], "\\.",
+                                      c("PrecursorMWALL","Percentile")),
+                             QCmetricsLongPrecMW_ALL[,4])
+head(QCmetricsLongPrecMW_ALL)
+colnames(QCmetricsLongPrecMW_ALL)[5] <- "value"
+
+
+##Create data frame melting the MS2perMS values
+QCmetricsLongMS2perMS_ALL <- melt(QCmetrics[,c(2,3,grep("MS2perMS1ALL.",colnames(QCmetrics)))],
+                              variable.name=" MS2perMS1ALL",
+                            value.name="value",
+                              id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongMS2perMS_ALL)
+QCmetricsLongMS2perMS_ALL <- cbind(QCmetricsLongMS2perMS_ALL[,1:2],
+                               colsplit(QCmetricsLongMS2perMS_ALL[,3], "\\.",
+                                        c("MS2perMS1ALL","Percentile")),
+                               QCmetricsLongMS2perMS_ALL[,4])
+head(QCmetricsLongMS2perMS_ALL)
+colnames(QCmetricsLongMS2perMS_ALL)[5] <- "value"
+
+##Create data frame melting MS2 charge ratio
+QCmetricsLongMS2ChargeRatio_ALL <- melt(QCmetrics[,c(2,3,grep("MS2ChargeALL.",colnames(QCmetrics)))],
+                                    variable.name=" MS2ChargeRatioALL",
+                                    value.name="value",
+                                    id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongMS2ChargeRatio_ALL)
+QCmetricsLongMS2ChargeRatio_ALL <- cbind(QCmetricsLongMS2ChargeRatio_ALL[,1:2],
+                                     colsplit(QCmetricsLongMS2ChargeRatio_ALL[,3], "\\.",
+                                              c("MS2chargeALL","MS2ChargeState","toCharge2ratio")),
+                                     QCmetricsLongMS2ChargeRatio_ALL[,4])
+head(QCmetricsLongMS2ChargeRatio_ALL)
+colnames(QCmetricsLongMS2ChargeRatio_ALL)[6] <- "value"
+QCmetricsLongMS2ChargeRatio_ALL$MS2chargeALL <- NULL
+
+```
+
+
+```{r,include=FALSE}
+##Change some column names to make things easier
+QCmetrics <- rename(QCmetrics,
+                    PrecursorIntensityID.0 = minPrecursorIntensity_ID,
+                    PrecursorIntensityID.5 = PrecursorIntensity5perc_ID,
+                    PrecursorIntensityID.25 = PrecursorIntensity25perc_ID,
+                    PrecursorIntensityID.50 = PrecursorIntensity50perc_ID,
+                    PrecursorIntensityID.75 = PrecursorIntensity75perc_ID,
+                    PrecursorIntensityID.95 = PrecursorIntensity95perc_ID,
+                    PrecursorIntensityID.100 = maxPrecursorIntensity_ID)
+QCmetrics <- rename(QCmetrics,
+                    PrecursorMZID.0 = minPrecursorMZ_ID,
+                    PrecursorMZID.5 = PrecursorMZ5perc_ID,
+                    PrecursorMZID.25 = PrecursorMZ25perc_ID,
+                    PrecursorMZID.50 = PrecursorMZ50perc_ID,
+                    PrecursorMZID.75 = PrecursorMZ75perc_ID,
+                    PrecursorMZID.95 = PrecursorMZ95perc_ID,
+                    PrecursorMZID.100 = maxPrecursorMZ_ID)
+
+QCmetrics <- rename(QCmetrics,
+                    PrecursorMWID.0 = minPrecursorMW_ID,
+                    PrecursorMWID.5 = PrecursorMW5perc_ID,
+                    PrecursorMWID.25 = PrecursorMW25perc_ID,
+                    PrecursorMWID.50 = PrecursorMW50perc_ID,
+                    PrecursorMWID.75 = PrecursorMW75perc_ID,
+                    PrecursorMWID.95 = PrecursorMW95perc_ID,
+                    PrecursorMWID.100 = maxPrecursorMW_ID)
+
+QCmetrics <- rename(QCmetrics,
+                    MS2perMS1ID.0 = minMS2perMS1_ID,
+                    MS2perMS1ID.5 = MS2perMS1_5perc_ID,
+                    MS2perMS1ID.25 = MS2perMS1_25perc_ID,
+                    MS2perMS1ID.50 = MS2perMS1_50perc_ID,
+                    MS2perMS1ID.75 = MS2perMS1_75perc_ID,
+                    MS2perMS1ID.95 = MS2perMS1_95perc_ID,
+                    MS2perMS1ID.100 = maxMS2perMS1_ID)
+
+QCmetrics$MS2ChargeID.1.toCharge2Ratio<- c(QCmetrics$MS2Charge1_ID/QCmetrics$MS2Charge2_ID)
+QCmetrics$MS2ChargeID.2.toCharge2Ratio<- with(QCmetrics, MS2Charge2_ID/MS2Charge2_ID)
+QCmetrics$MS2ChargeID.3.toCharge2Ratio<- with(QCmetrics, MS2Charge3_ID/MS2Charge2_ID)
+QCmetrics$MS2ChargeID.4.toCharge2Ratio<- with(QCmetrics, MS2Charge4_ID/MS2Charge2_ID)
+QCmetrics$MS2ChargeID.5andhigher.toCharge2Ratio<- with(QCmetrics, MS2Charge5andHigher_ID/MS2Charge2_ID)
+
+##Create data frame melting the precursor intensities
+QCmetricsLongPrecInt_ID <- melt(QCmetrics[,c(2,3,grep("PrecursorIntensityID.",colnames(QCmetrics)))],
+                             variable.name="PrecursorIntensityID",
+                             value.name="value",
+                             id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecInt_ID)
+QCmetricsLongPrecInt_ID <- cbind(QCmetricsLongPrecInt_ID[,1:2],
+                              colsplit(QCmetricsLongPrecInt_ID[,3], "\\.",
+                                       c("PrecursorIntensityID","Percentile")),
+                              QCmetricsLongPrecInt_ID[,4])
+head(QCmetricsLongPrecInt_ID)
+colnames(QCmetricsLongPrecInt_ID)[5] <- "value"
+
+##Create data frame melting the precursor MZ values
+QCmetricsLongPrecMZ_ID <- melt(QCmetrics[,c(2,3,grep("PrecursorMZID.",colnames(QCmetrics)))],
+                            variable.name="PrecursorMZID",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecMZ_ID)
+QCmetricsLongPrecMZ_ID <- cbind(QCmetricsLongPrecMZ_ID[,1:2],
+                             colsplit(QCmetricsLongPrecMZ_ID[,3], "\\.",
+                                      c("PrecursorMZID","Percentile")),
+                             QCmetricsLongPrecMZ_ID[,4])
+head(QCmetricsLongPrecMZ_ID)
+colnames(QCmetricsLongPrecMZ_ID)[5] <- "value"
+
+##Create data frame melting the precursor MW values
+QCmetricsLongPrecMW_ID <- melt(QCmetrics[,c(2,3,grep("PrecursorMWID.",colnames(QCmetrics)))],
+                            variable.name="PrecursorMWID",
+                            value.name="value",
+                            id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongPrecMW_ID)
+QCmetricsLongPrecMW_ID <- cbind(QCmetricsLongPrecMW_ID[,1:2],
+                             colsplit(QCmetricsLongPrecMW_ID[,3], "\\.",
+                                      c("PrecursorMWID","Percentile")),
+                             QCmetricsLongPrecMW_ID[,4])
+head(QCmetricsLongPrecMW_ID)
+colnames(QCmetricsLongPrecMW_ID)[5] <- "value"
+
+
+##Create data frame melting the MS2perMS values
+QCmetricsLongMS2perMS_ID <- melt(QCmetrics[,c(2,3,grep("MS2perMS1ID.",colnames(QCmetrics)))],
+                              variable.name=" MS2perMS1",
+                              value.name="value",
+                              id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongMS2perMS_ID)
+QCmetricsLongMS2perMS_ID <- cbind(QCmetricsLongMS2perMS_ID[,1:2],
+                               colsplit(QCmetricsLongMS2perMS_ID[,3], "\\.",
+                                        c("MS2perMS1ID","Percentile")),
+                               QCmetricsLongMS2perMS_ID[,4])
+head(QCmetricsLongMS2perMS_ID)
+colnames(QCmetricsLongMS2perMS_ID)[5] <- "value"
+
+##Create data frame melting MS2 charge ratio
+QCmetricsLongMS2ChargeRatio_ID <- melt(QCmetrics[,c(2,3,grep("MS2ChargeID.",colnames(QCmetrics)))],
+                                    variable.name=" MS2ChargeRatioID",
+                                    value.name="value",
+                                    id.vars=c("analyticalBasename","fractionNum"))
+head(QCmetricsLongMS2ChargeRatio_ID)
+QCmetricsLongMS2ChargeRatio_ID <- cbind(QCmetricsLongMS2ChargeRatio_ID[,1:2],
+                                     colsplit(QCmetricsLongMS2ChargeRatio_ID[,3], "\\.",
+                                              c("MS2chargeID","MS2ChargeState","toCharge2ratio")),
+                                     QCmetricsLongMS2ChargeRatio_ID[,4])
+head(QCmetricsLongMS2ChargeRatio_ID)
+colnames(QCmetricsLongMS2ChargeRatio_ID)[6] <- "value"
+QCmetricsLongMS2ChargeRatio_ID$MS2chargeID <- NULL
+
+
+```
+
+```{r,include=FALSE}
+# generating a color Palettes for ggvis 
+# plotColorPalettes is the function for generating the pallettes, the colors in the palettes depends on the number we put in 
+# in our case, the palettes is called plotcolor
+
+plotColorPalettes <- function(g){
+  d <- 360/g
+  h <- cumsum(c(15, rep(d,g - 1)))
+  hcl(h = h, c = 100, l = 65)
+}
+plotcolor <- plotColorPalettes(length(analyticalSamples)) # the number of colors is the same as how many analytical smples in the data. 
+```
+
+
+```{r, include=FALSE}
+grid_arrange_shared_legend <- function(..., ncol = length(list(...)), nrow = 1, position = c("bottom", "right")) {
+
+  plots <- list(...) 
+  position <- match.arg(position)
+  g <- ggplotGrob(plots[[1]] +theme(legend.position = position))$grobs
+  legend <- g[[which(sapply(g, function(x) x$name) == "guide-box")]]
+  lheight <- sum(legend$height)
+  lwidth <- sum(legend$width)
+  gl <- lapply(plots, function(x) x + theme(legend.position="none"))
+  gl <- c(gl, ncol = ncol, nrow = nrow)
+
+  combined <- switch(position,
+                     "bottom" = arrangeGrob(do.call(arrangeGrob, gl),
+                                            legend,
+                                            ncol = 1,
+                                            heights = unit.c(unit(1, "npc") - lheight, lheight)),
+                     "right" = arrangeGrob(do.call(arrangeGrob, gl),
+                                           legend,
+                                           ncol = 2,
+                                           widths = unit.c(unit(1, "npc") - lwidth, lwidth)))
+  grid.newpage()
+  grid.draw(combined)
+  # return gtable invisibly
+  invisible(combined)
+
+}
+
+```
+
+
+```{r}
+
+# make a function to compute the max and min value 
+##  Only useful for those has different percentiles
+### n and m represent 2 differnt data frame that you want to compare with
+
+find_max<-function(n, m)
+{
+  max_n <- max(max(subset(n, Percentile <= 95,select=c(value))), max(subset(m, Percentile <= 95,select=c(value))))
+  return(max_n)
+}
+
+#find_max(QCmetricsLongPrecMW_ALL, QCmetricsLongPrecMW_ID)
+
+find_min <- function(n,m)
+{
+  min_n <- min(min(subset(n, Percentile <= 95,select=c(value))), min(subset(m, Percentile <= 95,select=c(value))))
+  return(min_n)
+}
+
+# create title for each of the plot 
+title_ALL <- "For all spectra"
+title_ID <- "For identified spectra"
+
+#find_min(QCmetricsLongPrecMW_ALL, QCmetricsLongPrecMW_ID)
+```
+
+```{r}
+## generate a function to creat the scatter plot for different percentile 
+
+## in this case n represent the data frame contains all spectra, m represent the dataframe contains only the identified spectra and i represent the y lable for each plot , remember to put "i".
+
+# The kind defines the kind of input data, remeber to put "" mark
+
+## WITH SAME scales
+generate_scatter_plot <- function(kind,n,m,i)   
+  {
+  if(kind == "percentile")
+    {
+    g_all <- ggplot(n[n$Percentile %in% c(5,25,50,75,95),],aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ Percentile) +
+      geom_point() +
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") + ylab(i) + ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor all spectra") + theme(plot.title = element_text(size = 10, face = "bold")) +
+      ylim(find_min(n,m),find_max(n,m)) + theme(legend.position = "top")
+    g_id <- ggplot(m[m$Percentile %in% c(5,25,50,75,95),], aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ Percentile) +
+      geom_point() +
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") + ylab(i) + ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor identified spectra") + theme(plot.title = element_text(size = 10, face = "bold")) +
+      ylim(find_min(n,m),find_max(n,m)) + theme(legend.position = "top")
+    if(length(analyticalSamples)<=10)
+       {
+      grid_arrange_shared_legend(g_all , g_id , ncol=2)
+       } else {
+        grid_arrange_shared_legend(g_all, g_id , ncol=2) + theme(legend.position="none")
+      }
+  } else if(kind == "chargestate" )
+    {
+    g_all <- ggplot(n[n$MS2ChargeState %in% c(1,2,3,4,"5andhigher"),], aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ MS2ChargeState) +
+      geom_point() +
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") + ylab(i) + ggtitle("Each analytical sample is a different color\nEach panel is a different charge state\n\nFor identified spectra") +
+      theme(plot.title = element_text(size = 10, face = "bold"))+
+      theme(axis.text.x  = element_text(angle = 45, vjust=0.5)) +
+      #scale_x_discrete(breaks = seq(from = 1, to = 25 ,by = 5)) +
+      ylim(min(min(n$value),min(m$value)),max(max(n$value),max(m$value)))
+    
+    g_id <- ggplot(m[m$MS2ChargeState %in% c(1,2,3,4,"5andhigher"),], aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ MS2ChargeState) +
+      geom_point() +
+      ggtitle(title_ID) + 
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") +ylab(i) + ggtitle("Each analytical sample is a different color\nEach panle is a different charge state\n\nFor identified spectra") +
+      theme(plot.title = element_text(size = 10, face = "bold")) +
+      theme(axis.text.x  = element_text(angle=45, vjust=0.5)) +
+      # scale_x_discrete(breaks = seq(from = 1, to = 25 ,by = 5)) +
+      ylim(min(min(n$value),min(m$value)),max(max(n$value),max(m$value)))
+    
+    if(length(analyticalSamples)<=10){
+      grid_arrange_shared_legend(g_all , g_id , ncol=2)} 
+    else {
+      grid_arrange_shared_legend(g_all , g_id , ncol=2)
+      +theme(legend.position="none")
+      }
+    }
+ 
+  
+}
+
+
+#generate_scatter_plot("percentile",QCmetricsLongPrecMZ_ALL,QCmetricsLongPrecMZ_ID, "Precursor M/Z")
+#generate_scatter_plot("chargestate", QCmetricsLongMS2ChargeRatioTotal_ALL, QCmetricsLongMS2ChargeRatioTotal_ID, "MS2 Charge Ratio")
+
+## generate a scatter plot for different percentile without the same scale 
+## the parameter is the same as the previouse one 
+
+generate_scatter_plot_noscale <- function(kind,n,m,i)   
+  {
+  if(kind == "percentile")
+    {
+    g_all <- ggplot(n[n$Percentile %in% c(5,25,50,75,95),],aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ Percentile) +
+      geom_point() +
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") + ylab(i) + ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor all spectra") + theme(plot.title = element_text(size = 10, face = "bold"))
+    
+    g_id <- ggplot(m[m$Percentile %in% c(5,25,50,75,95),], aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ Percentile) +
+      geom_point() +
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") + ylab(i) + ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor identified spectra") + theme(plot.title = element_text(size = 10, face = "bold"))
+    
+    if(length(analyticalSamples)<=10)
+       {
+      grid_arrange_shared_legend(g_all , g_id , ncol=2)
+       } else {
+        grid_arrange_shared_legend(g_all, g_id , ncol=2) + theme(legend.position="none")
+      }
+  }else if(kind == "chargestate" )
+    {
+    g_all <- ggplot(n[n$MS2ChargeState %in% c(1,2,3,4,"5andhigher"),], aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ MS2ChargeState) +
+      geom_point() +
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") + ylab(i) + ggtitle("Each analytical sample is a different color\nEach panel is a different change state\n\nFor identified spectra") +
+      theme(plot.title = element_text(size = 10, face = "bold"))#+
+     # scale_x_discrete(breaks = seq(from = 1, to = 25 ,by = 5)) +
+      #theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+    
+    g_id <- ggplot(m[m$MS2ChargeState %in% c(1,2,3,4,"5andhigher"),], aes(y=value, x=fractionNum, col=analyticalBasename, group=analyticalBasename)) +
+      facet_grid(~ MS2ChargeState) +
+      geom_point() +
+      scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+      xlab("Fraction") +ylab(i) + ggtitle("Each analytical sample is a different color\nEach panel is a different change state\n\nFor identified spectra") +
+      theme(plot.title = element_text(size = 10, face = "bold")) #+
+     # scale_x_discrete(breaks = seq(from = 1, to = 25 ,by = 5)) +
+     # theme(axis.text.x  = element_text(angle=90, vjust=0.5)) 
+    
+    if(length(analyticalSamples)<=10){
+      grid_arrange_shared_legend(g_all , g_id , ncol=2)} 
+    else {
+      grid_arrange_shared_legend(g_all , g_id , ncol=2)
+      +theme(legend.position="none")
+      }
+    }
+ 
+  
+}
+#generate_scatter_plot_noscale("percentile",QCmetricsLongPrecMZ_ALL,QCmetricsLongPrecMZ_ID, "Precursor M/Z")
+#generate_scatter_plot("chargestate", QCmetricsLongMS2ChargeRatioTotal_ALL, QCmetricsLongMS2ChargeRatioTotal_ID, "MS2 Charge Ratio")
+
+
+```
+
+
+```{r}
+
+# Build a function for generating the a table with 
+## we have 2 parameter one is the kind we want for rows and the other is the dataframe we are sing to generate the table 
+
+##remember to put the "" mark, it only has 2 choices one is fraction and the other one is analytical samples, each kind will generate a pre-determined table 
+
+percentage_table <- function(kind, n)
+  {
+  
+  B=c(5,25,50,75,95)
+  
+  # generate a dataframe
+  num_row <-  as.numeric(count(unique(select(n, contains(kind)))))
+
+  perc_table = matrix(,nrow = num_row, ncol = length(B))
+  
+  if(kind == "fraction"){
+    for (i in 1:num_row){
+      for (j in 1:length(B)){
+        perc_table[i,j]<-round(length(which(n$Percentile == B[j] & n$fractionNum == i))/length(which(QCmetricsLongPrecInt_ALL$fractionNum == i &QCmetricsLongPrecInt_ALL$Percentile == B[j]))*100, 3)
+        
+       }
+     }
+    colnames(perc_table) <- c("5th Perc", "25th Perc", "50th Perc", "75th Perc","95th Perc")
+    rownames(perc_table) <- c(paste0("fraction", c(1:25)))
+    kable(perc_table) %>% kable_styling(bootstrap_options = "striped", full_width = F)
+        
+  }else if(kind == "analytical"){
+    for (i in 1:length(analyticalSamples)){
+      for(j in 1:length(B)){
+        perc_table[i,j] <- round(length(which(n$Percentile == B[j] & n$value <20 & n$analyticalBasename == analyticalSamples[i] ))/ length(which(n$Percentile == B[j] & n$analyticalBasename == analyticalSamples[i]))*100,3)
+      }
+      
+}
+    colnames(perc_table) <- c(paste0(B, rep("th Perc", 5)))
+    rownames(perc_table) <- c(as.character(analyticalSamples))
+    kable(perc_table, caption = "Percent of samples' value less than 20") %>%
+      kable_styling(bootstrap_options = "striped") 
+  }
+}
+
+#percentage_table("fraction",QCPrecIntof0_ALL )
+
+```  
+
+
+
+## Data file 
+  We used the "CompRefBI_mzml_metricInfo_all_id.07272017.tsv" data file in this report.
+To see the data file in tsv format, please click 
+
+<a href="./CompRefBI_mzml_metricInfo_all_id.07272017.tsv" target="_blank"><b>Here</b></a>
+  
+  
+<a href="#top">Back to top</a>
+  
+  
+## PDF file 
+  To generate the PDF file of this report please run the following code in the R command line 
+"rmarkdown::render("./static_dv7_17.Rmd", output_format="pdf_document")"
+To view the generated PDF file, please click
+
+<a href="./static_dv7_17.pdf" target="_blank"><b>Here</b></a>
+  
+  
+  <a href="#top">Back to top</a>
+  
+  
+## Number of MS2 spectra
+### Per sample, across fraction (boxplot) , without the same scale 
+
+```{r,fig.height=8, fig.width=8}
+
+# get the max and the min number of MS2 spectra, including ALL and ID
+max_MS2 <- max(max(QCmetrics$numofMS2_ALL), max(QCmetrics$numofMS2_ID))
+min_MS2 <- min(min(QCmetrics$numofMS2_ALL), min(QCmetrics$numofMS2_ID))
+
+
+##Get boxplot of number of spectra across fractions
+g_MS2box_all <- ggplot(QCmetrics, aes(y=numofMS2_ALL, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle(title_ALL) +
+  xlab("Analytical sample") + ylab("Number of spectra") + 
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+##Get boxplot of number of spectra across fractions
+g_MS2box_id <- ggplot(QCmetrics, aes(y=numofMS2_ID, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle("For identified spectra") +
+  xlab("Analytical sample") + ylab("Number of spectra") +
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+if(length(analyticalSamples)<=10)
+{
+  grid.arrange(g_MS2box_all, g_MS2box_id, ncol=2, top= "Number of MS2 spectra across fractions \nEach analytical sample is a different color\n")
+} else {
+  grid.arrange(g_MS2box_all, g_MS2box_id,ncol=2, top = "Number of MS2 spectra across fractions\nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+
+### Per sample, across fraction (boxplot) , with the same scale 
+```{r,fig.height=8, fig.width=8}
+
+##Get boxplot of number of spectra across fractions
+g_MS2box_all <- ggplot(QCmetrics, aes(y=numofMS2_ALL, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle(title_ALL) +
+  xlab("Analytical sample") + ylab("Number of spectra") + ylim(min_MS2, max_MS2)+
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+##Get boxplot of number of spectra across fractions
+g_MS2box_id <- ggplot(QCmetrics, aes(y=numofMS2_ID, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle(title_ID) +
+  xlab("Analytical sample") + ylab("Number of spectra") + ylim(min_MS2, max_MS2) +
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+if(length(analyticalSamples)<=10)
+{
+  grid.arrange(g_MS2box_all, g_MS2box_id, ncol=2, top= "Number of MS2 spectra across fractions \nEach analytical sample is a different color\n")
+} else {
+  grid.arrange(g_MS2box_all, g_MS2box_id,ncol=2, top = "Number of MS2 spectra across fractions\nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+
+### Per sample, versus fraction (scatterplot), without the same scale 
+```{r, fig.width=10, fig.height=6}
+g_MS2sca_all <- ggplot(QCmetrics, aes(y=numofMS2_ALL, x=fractionNum, col=analyticalBasename)) +
+  geom_point() +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  stat_smooth(method="loess", fill="grey50", size=0)+
+  ggtitle(title_ALL) +
+  xlab("Fraction") + ylab("Number of spectra") +theme(legend.position="top")
+
+g_MS2sca_id <- ggplot(QCmetrics, aes(y=numofMS2_ID, x=fractionNum, col=analyticalBasename)) +
+  geom_point() +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  stat_smooth(method="loess", fill="grey50", size=0)+
+  ggtitle(title_ID) +
+  xlab("Fraction") + ylab("Number of spectra") + theme(legend.position="top")
+if(length(analyticalSamples)<=10)
+{
+  grid_arrange_shared_legend(g_MS2sca_all, g_MS2sca_id, ncol=2, top= "Number of MS2 spectra across fractions \nEach analytical sample is a different color\n")
+} else {
+  grid_arrange_shared_legend(g_MS2sca_all, g_MS2sca_id, ncol=2, top = "Number of MS2 spectra across fractions\nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, versus fraction (scatterplot), with the same scale 
+```{r,fig.width=10, fig.height=6}
+g_MS2sca_all <- ggplot(QCmetrics, aes(y=numofMS2_ALL, x=fractionNum, col=analyticalBasename)) +
+  geom_point() +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  stat_smooth(method="loess", fill="grey50", size=0)+
+  ggtitle(title_ALL) +
+  xlab("Fraction") + ylab("Number of spectra") + ylim(min_MS2, max_MS2) + theme(legend.position="top")
+
+g_MS2sca_id <- ggplot(QCmetrics, aes(y=numofMS2_ID, x=fractionNum, col=analyticalBasename)) +
+  geom_point() +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  stat_smooth(method="loess", fill="grey50", size=0)+
+  ggtitle(title_ID) +
+  xlab("Fraction") + ylab("Number of spectra") + ylim(min_MS2, max_MS2) + theme(legend.position="top")
+
+if(length(analyticalSamples)<=10)
+{
+  grid_arrange_shared_legend(g_MS2sca_all, g_MS2sca_id, ncol=2, top= "Number of MS2 spectra across fractions \nEach analytical sample is a different color\n")
+} else {
+  grid_arrange_shared_legend(g_MS2sca_all, g_MS2sca_id, ncol=2, top = "Number of MS2 spectra across fractions\nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+
+### Number of MS2 spectra versus fraction (boxplot), without the same scale
+```{r,  fig.width=10, fig.height=6}
+g_MS2box2_all <-ggplot(QCmetrics, aes(y=numofMS2_ALL, x=factor(fractionNum))) +
+  geom_point(aes(col=analyticalBasename)) +
+  stat_smooth(aes(y=numofMS2_ALL, x=fractionNum, col=analyticalBasename),method="loess", fill="grey50", size=0)+
+  geom_boxplot(outlier.size=NA) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  ggtitle(title_ALL) +
+  xlab("Fraction") + ylab("Number of spectra")  + theme(legend.position="top")
+
+
+g_MS2box2_id <- ggplot(QCmetrics, aes(y=numofMS2_ID, x=factor(fractionNum))) +
+  geom_point(aes(col=analyticalBasename)) +
+  stat_smooth(aes(y=numofMS2_ID, x=fractionNum, col=analyticalBasename),method="loess", fill="grey50", size=0)+##, color="grey50") +
+  geom_boxplot(outlier.size=NA) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  ggtitle(title_ID) +
+  xlab("Fraction") + ylab("Number of spectra")  + theme(legend.position="top")
+
+if(length(analyticalSamples)<=10)
+{
+  grid_arrange_shared_legend(g_MS2box2_all, g_MS2box2_id, ncol=2, top= "Number of MS2 spectra across fractions \nEach analytical sample is a different color\n")
+} else {
+  grid_arrange_shared_legend(g_MS2box2_all, g_MS2box2_id, ncol=2, top = "Number of MS2 spectra across fractions\nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+  
+  
+### Number of MS2 spectra versus fraction (boxplot), with the same scale
+```{r,  fig.width=10, fig.height=6}
+g_MS2box2_all <-ggplot(QCmetrics, aes(y=numofMS2_ALL, x=factor(fractionNum))) +
+  geom_point(aes(col=analyticalBasename)) +
+  stat_smooth(aes(y=numofMS2_ALL, x=fractionNum, col=analyticalBasename),method="loess", fill="grey50", size=0)+##, color="grey50") +
+  geom_boxplot(outlier.size=NA) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  ggtitle(title_ALL) +
+  xlab("Fraction") + ylab("Number of spectra")  + ylim(min_MS2, max_MS2) + theme(legend.position="top")
+
+
+g_MS2box2_id <- ggplot(QCmetrics, aes(y=numofMS2_ID, x=factor(fractionNum))) +
+  geom_point(aes(col=analyticalBasename)) +
+  stat_smooth(aes(y=numofMS2_ID, x=fractionNum, col=analyticalBasename),method="loess", fill="grey50", size=0)+##, color="grey50") +
+  geom_boxplot(outlier.size=NA) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  ggtitle(title_ID) +
+  xlab("Fraction") + ylab("Number of spectra")  + ylim(min_MS2, max_MS2) + theme(legend.position="top")
+
+if(length(analyticalSamples)<=10)
+{
+  grid_arrange_shared_legend(g_MS2box2_all, g_MS2box2_id, ncol=2, top= "Number of MS2 spectra across fractions \nEach analytical sample is a different color\n")
+} else {
+  grid_arrange_shared_legend(g_MS2box2_all, g_MS2box2_id, ncol=2, top = "Number of MS2 spectra across fractions\nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>  
+  
+## Precursor intensity values
+### Range of Precursor intensity values For all spectra
+  This table shows the range of the precursor intensity for each percentile, as a summary and to see if there are any value of 0 that cannot be log-transformed
+
+```{r}
+B = c(5,25,50,75,95)
+
+rangetable_ALL = matrix(,nrow = 2, ncol = length(B), byrow = TRUE)
+for (i in 1:length(B)){
+  rangesub_ALL <-subset(QCmetricsLongPrecInt_ALL, QCmetricsLongPrecInt_ALL$Percentile == B[i])
+  # filter to get only the wanted percentile
+  #print(range(rangesub$value))
+  rangetable_ALL[1,i] <- toString(round(range(rangesub_ALL$value),2))
+  rangetable_ALL[2,i] <- toString(signif(log10(range(rangesub_ALL$value)),3))
+}
+colnames(rangetable_ALL)<-c("5th Perc","25th perc","50th perc","75th perc","95th perc")
+rownames(rangetable_ALL)<-c("range", "range of log10 transformed")
+#rangetable
+kable(rangetable_ALL) %>% kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+```
+
+<a href="#top">Back to top</a>
+
+
+
+  
+### Range of Precursor intensity values For identified spectra
+  This table shows the range of the precursor intensity for each percentile, as a summary and to see if there are any value of 0 that cannot be log-transformed
+```{r}
+B = c(5,25,50,75,95)
+
+rangetable_ID = matrix(,nrow = 2, ncol = length(B), byrow = TRUE)
+for (i in 1:length(B)){
+  rangesub_ID <-subset(QCmetricsLongPrecInt_ID, QCmetricsLongPrecInt_ID$Percentile == B[i])
+  # filter to get only the wanted percentile
+  #print(range(rangesub$value))
+  rangetable_ID[1,i] <- toString(round(range(rangesub_ID$value),2))
+  rangetable_ID[2,i] <- toString(signif(log10(range(rangesub_ID$value)),3))
+}
+colnames(rangetable_ID)<-c("5th Perc","25th perc","50th perc","75th perc","95th perc")
+rownames(rangetable_ID)<-c("range", "range of log10 transformed")
+#rangetable
+kable(rangetable_ID) %>% kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+```
+
+<a href="#top">Back to top</a>
+
+
+###Per sample, versus fraction (scatterplot), with the same scale 
+```{r, fig.width=10, fig.height=6}
+Pmin_ALL <- log10(min(QCmetricsLongPrecInt_ALL$value[QCmetricsLongPrecInt_ALL$value > 0]))
+Pmax_ALL <- log10(max(QCmetricsLongPrecInt_ALL$value))
+
+QCmetricsLongPrecInt_ALL$value2 <- QCmetricsLongPrecInt_ALL$value
+QCmetricsLongPrecInt_ALL$value2[QCmetricsLongPrecInt_ALL$value2 == 0] <-
+  min(QCmetricsLongPrecInt_ALL$value2[QCmetricsLongPrecInt_ALL$value2 > 0])*0.5
+
+g_PIsca_all <- ggplot(QCmetricsLongPrecInt_ALL[QCmetricsLongPrecInt_ALL$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=log10(value2), x=fractionNum, col=analyticalBasename, group=analyticalBasename)) + 
+  facet_grid(~ Percentile) +
+  geom_point() +
+  ylim(c(Pmin_ALL, Pmax_ALL)) +
+  ggtitle(title_ALL) +
+  xlab("Fraction") + ylab("log10(Precursor intensity)") + theme(legend.position = "top") +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample")
+
+
+Pmin_ID <- log10(min(QCmetricsLongPrecInt_ID$value[QCmetricsLongPrecInt_ID$value > 0]))
+Pmax_ID <- log10(max(QCmetricsLongPrecInt_ID$value))
+
+QCmetricsLongPrecInt_ID$value2 <- QCmetricsLongPrecInt_ID$value
+QCmetricsLongPrecInt_ID$value2[QCmetricsLongPrecInt_ID$value2 == 0] <-
+  min(QCmetricsLongPrecInt_ID$value2[QCmetricsLongPrecInt_ID$value2 > 0])*0.5
+
+#CAUTION!!!!In this case we've rename the colu
+#colnames(QCmetricsLongMS2ChargeRatio_ID)[6] <- "value"
+
+g_PIsca_id <- ggplot(QCmetricsLongPrecInt_ID[QCmetricsLongPrecInt_ID$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=log10(value2), x=fractionNum, col=analyticalBasename, group=analyticalBasename)) + 
+  facet_grid(~ Percentile) +
+  geom_point() +
+  ylim(c(Pmin_ID, Pmax_ID)) +
+  ggtitle(title_ID) +
+  xlab("Fraction") + ylab("log10(Precursor intensity)") + theme(legend.position = "top") +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample")
+
+if(length(analyticalSamples)<=10)
+{
+  grid_arrange_shared_legend(g_PIsca_all, g_PIsca_id , ncol=2, top= "5%,25%,50%,75%,95% for precursor intensity \nEach analytical sample is a different color\n Each panel is a different percentile\n")
+} else {
+  grid_arrange_shared_legend(g_PIsca_all, g_PIsca_id, ncol=2, top = "5%,25%,50%,75%,95% for precursor intensity \nEach analytical sample is a different color\n Each panel is a different percentile\n") +theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+  
+### Percentage of 0 precursor intensities at different percentiles, For all spectra 
+  In this table, each row represents a fraction and each column represents a percentile. Each value represents the percent of samples that have a precursor intensity of 0 at that fraction and that percentile.
+```{r}
+# This table indicates the percente of 0 in the value column
+
+QCPrecIntof0_ALL <- subset(QCmetricsLongPrecInt_ALL, QCmetricsLongPrecInt_ALL$value == 0)
+percentage_table("fraction",QCPrecIntof0_ALL )
+
+
+```
+
+<a href="#top">Back to top</a>
+
+  
+### Percentage of 0 precursor intensities at different percentiles, For identified spectra 
+  In this table, each row represents a fraction and each column represents a percentile. Each value represents the percent of samples that have a precursor intensity of 0 at that fraction and that percentile.
+```{r}
+# This table indicates the percente of 0 in the value column
+
+#generate a dataframe contians only the precInt is 0
+QCPrecIntof0_ID <- subset(QCmetricsLongPrecInt_ID, QCmetricsLongPrecInt_ID$value == 0)
+#QCPrecIntof0_ID
+
+#generate the dataframe where the rows are different fractions and the columns are different percentile
+percentage_table("fraction",QCPrecIntof0_ID )
+
+```
+
+<a href="#top">Back to top</a>
+  
+    
+## Precursor m/z values
+### Per sample, versus fraction (scatterplot), without the same scale 
+  
+```{r, fig.width=10, fig.height=6}
+# get the min and max for the precursor m/z among both all the spectras and the identified spetras. 
+
+generate_scatter_plot_noscale("percentile",QCmetricsLongPrecMZ_ALL,QCmetricsLongPrecMZ_ID, "Precursor M/Z")
+
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, versus fraction (scatterplot), with same scale 
+  
+```{r,fig.width=10, fig.height=6}
+
+generate_scatter_plot("percentile",QCmetricsLongPrecMZ_ALL,QCmetricsLongPrecMZ_ID, "Precursor M/Z")
+
+```
+
+<a href="#top">Back to top</a>
+    
+## Precursor Molecular weight (MW) values
+### Per sample, versus fraction (scatterplot), without the same scale 
+```{r,fig.width=10, fig.height=6}
+generate_scatter_plot_noscale("percentile",QCmetricsLongPrecMW_ALL,QCmetricsLongPrecMW_ID, "Precursor Molecular Weight")
+
+```
+
+<a href="#top">Back to top</a>
+
+### Per sample, versus fraction (scatterplot), with the same scale 
+```{r,fig.width=10, fig.height=6}
+
+generate_scatter_plot("percentile",QCmetricsLongPrecMW_ALL,QCmetricsLongPrecMW_ID, "Precursor Molecular Weight")
+
+```
+
+<a href="#top">Back to top</a>
+  
+    
+### Per sample, across fraction at 50 percentile (boxplot), without the same scale
+```{r, fig.height=8, fig.width=6}
+##Get boxplot of number of spectra across fractions
+g_PMWbox50_all <- ggplot(QCmetricsLongPrecMW_ALL[QCmetricsLongPrecMW_ALL$Percentile %in% c(50),], aes(y=value, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle(title_ALL) +
+  xlab("Analytical sample") + ylab("Precursor Molecular Weight") + theme(legend.position = "top") +
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+g_PMWbox50_id <- ggplot(QCmetricsLongPrecMW_ID[QCmetricsLongPrecMW_ID$Percentile %in% c(50),], aes(y=value, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle(title_ID) +
+  xlab("Analytical sample") + ylab("Precursor Molecular Weight") + theme(legend.position = "top") +
+  scale_color_discrete(name = "Analytical sample") +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+if(length(analyticalSamples)<=10)
+{
+  grid.arrange(g_PMWbox50_all , g_PMWbox50_id , ncol=2, top= "5%,25%,50%,75%,95% for precursor molecular weight \nEach analytical sample is a different color\n")
+} else {
+  grid.arrange(g_PMWbox50_all , g_PMWbox50_id , ncol=2, top = "5%,25%,50%,75%,95% for precursor molecular weight \nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, across fraction at 50 percentile (boxplot), with the same scale
+```{r, fig.height=8, fig.width=6}
+##Get boxplot of number of spectra across fractions
+g_PMWbox50_all <- ggplot(QCmetricsLongPrecMW_ALL[QCmetricsLongPrecMW_ALL$Percentile %in% c(50),], aes(y=value, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle(title_ALL) +
+  xlab("Analytical sample") + ylab("Precursor Molecular Weight") + theme(legend.position = "top") +
+  scale_color_discrete(name = "Analytical sample") +
+  ylim(find_min(QCmetricsLongPrecMW_ALL, QCmetricsLongPrecMW_ID), find_max(QCmetricsLongPrecMW_ALL, QCmetricsLongPrecMW_ID)) +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+g_PMWbox50_id <- ggplot(QCmetricsLongPrecMW_ID[QCmetricsLongPrecMW_ID$Percentile %in% c(50),], aes(y=value, x=analyticalBasename, col=analyticalBasename)) +
+  geom_boxplot(colour = plotcolor[1:length(analyticalSamples)]) +
+  ggtitle(title_ID) +
+  xlab("Analytical sample") + ylab("Precursor Molecular Weight") + theme(legend.position = "top") +
+  scale_color_discrete(name = "Analytical sample") +
+  ylim(find_min(QCmetricsLongPrecMW_ALL, QCmetricsLongPrecMW_ID), find_max(QCmetricsLongPrecMW_ALL, QCmetricsLongPrecMW_ID)) +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+if(length(analyticalSamples)<=10)
+{
+  grid.arrange(g_PMWbox50_all , g_PMWbox50_id , ncol=2)
+} else {
+  grid.arrange(g_PMWbox50_all , g_PMWbox50_id , ncol=2) +theme(legend.position="none")
+}
+
+```
+
+<a href="#top">Back to top</a>
+  
+    
+### Per sample, across fraction (boxplot), without the same scale 
+```{r,fig.width=10, fig.height= 8}
+
+g_PMWbox_all <- ggplot(QCmetricsLongPrecMW_ALL[QCmetricsLongPrecMW_ALL$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=analyticalBasename, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_boxplot () +
+  ggtitle(title_ALL) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Precursor Molecular Weight") +
+  ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor all spectra") + theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5)) +
+  theme(legend.position="top")
+
+g_PMWbox_id <- ggplot(QCmetricsLongPrecMW_ID[QCmetricsLongPrecMW_ID$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=analyticalBasename, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_boxplot () +
+  ggtitle(title_ID) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Precursor Molecular Weight") + theme(legend.position = "top") +
+  ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor identified spectra") + theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+if(length(analyticalSamples)<=10)
+{
+  grid_arrange_shared_legend(g_PMWbox_all , g_PMWbox_id , ncol=2)
+} else {
+  grid_arrange_shared_legend(g_PMWbox_all , g_PMWbox_id , ncol=2) +theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+
+
+### Per sample, across fraction (boxplot), with the same scale 
+```{r,fig.width=10, fig.height= 8}
+g_PMWbox_all <- ggplot(QCmetricsLongPrecMW_ALL[QCmetricsLongPrecMW_ALL$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=analyticalBasename, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_boxplot () +
+  ggtitle(title_ALL) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Precursor Molecular Weight") + ylim(find_min(QCmetricsLongPrecMW_ALL,QCmetricsLongPrecMW_ID), find_max(QCmetricsLongPrecMW_ALL,QCmetricsLongPrecMW_ID)) +
+  ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor all spectra") + theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5)) +
+  theme(legend.position="top")
+
+g_PMWbox_id <- ggplot(QCmetricsLongPrecMW_ID[QCmetricsLongPrecMW_ID$Percentile %in% c(5,25,50,75,95),], 
+            aes(y=value, x=analyticalBasename, col=analyticalBasename, group=analyticalBasename)) +
+  facet_grid(~ Percentile) +
+  geom_boxplot () +
+  ggtitle(title_ID) +
+  scale_color_manual (values = c(plotcolor), name = "Analytical Sample") +
+  xlab("Fraction") + ylab("Precursor Molecular Weight") + ylim(find_min(QCmetricsLongPrecMW_ALL,QCmetricsLongPrecMW_ID), find_max(QCmetricsLongPrecMW_ALL,QCmetricsLongPrecMW_ID)) +theme(legend.position = "top") +
+  ggtitle("Each analytical sample is a different color\nEach panel is a different percentile\n\nFor identified spectra") + theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.text.x  = element_text(angle=90, vjust=0.5))
+
+if(length(analyticalSamples)<=10)
+{
+  grid_arrange_shared_legend(g_PMWbox_all , g_PMWbox_id , ncol=2, top= "Precursor molecular weight at 50 percentile \nEach analytical sample is a different color\n")
+} else {
+  grid_arrange_shared_legend(g_PMWbox_all , g_PMWbox_id , ncol=2, top = "Precursor molecular weightat 50 percentile\nNumber of MS2 spectra across fractions\nEach analytical sample is a different color\n") +theme(legend.position="none")
+}
+```
+
+<a href="#top">Back to top</a>
+  
+    
+## MS2 per MS1 values
+### Per sample, versus fraction (scatterplot), without the same scale 
+```{r,fig.width=10, fig.height=6}
+
+generate_scatter_plot_noscale("percentile",QCmetricsLongMS2perMS_ALL,QCmetricsLongMS2perMS_ID, "MS2 per MS1 value")
+
+
+```
+
+<a href="#top">Back to top</a>
+
+### Per sample, versus fraction (scatterplot), with the same scale 
+```{r,fig.width=10, fig.height=6}
+
+generate_scatter_plot("percentile",QCmetricsLongMS2perMS_ALL,QCmetricsLongMS2perMS_ID, "MS2 per MS1 value")
+
+```
+
+<a href="#top">Back to top</a>
+
+
+### Median of MS2 per MS1 value for all spectra
+In this table, the meidian MS2 per MS1 value is present, each column represent a different percentile. 
+```{r}
+
+## generate a table which will show the median of the value for each percentile
+
+find_median_table <-function(n){
+  
+  # Use B to define the percentile we want in the table 
+  B = c(5,25,50,75,95)
+  
+  # generate teh data frame we want to show in the table 
+  dataframetable = matrix(, nrow = length(analyticalSamples), ncol = length(B)) 
+  for (i in 1: length(analyticalSamples)){
+    for (j in 1:length(B)){ 
+      D <-subset(n , Percentile == B[j] & analyticalBasename == analyticalSamples[i],select=c(value))
+      dataframetable[i,j] <- median(D$value)
+    }
+    }
+  #QCPrecIntTable_ALL
+  colnames(dataframetable) <- c(paste0(B, rep("th Perc", 5)))
+  rownames(dataframetable) <- c(as.character(analyticalSamples))
+  kable(dataframetable, caption = "The median of MS2 per MS1") %>%
+  kable_styling(bootstrap_options = "striped") 
+  
+}
+
+
+find_median_table(QCmetricsLongMS2perMS_ALL)
+
+```
+<a href="#top">Back to top</a>
+
+
+### Median of MS2 per MS1 value for identified spectra
+In this table, the meidian MS2 per MS1 value is present, each column represent a different percentile. 
+```{r}
+
+find_median_table(QCmetricsLongMS2perMS_ID)
+
+```
+
+<a href="#top">Back to top</a>
+
+
+
+### Table of values less than 20 for all spectra
+In this table the percent for the values less than 20 are present, each column is a different percentile
+```{r}
+percentage_table("analytical",QCmetricsLongMS2perMS_ALL )
+
+```
+<a href="#top">Back to top</a>
+  
+  
+### Table of values less than 20 for identified spectra
+In this table the percent for the values less than 20 are present, each column is a different percentile
+```{r}
+
+percentage_table("analytical",QCmetricsLongMS2perMS_ID )
+
+```
+<a href="#top">Back to top</a>
+  
+  
+## Different MS2 charge state to MS2 charge 2 ratio
+### Per sample, versus fraction (scatterplot), without the same scale 
+```{r,  fig.width=10, fig.height=6}
+
+generate_scatter_plot_noscale("chargestate", QCmetricsLongMS2ChargeRatio_ALL, QCmetricsLongMS2ChargeRatio_ID, "MS2 Charge Ratio")
+
+```
+
+<a href="#top">Back to top</a>
+
+### Per sample, versus fraction (scatterplot), with the same scale 
+```{r,  fig.width=10, fig.height=6}
+# get the min and the max value for the MS2 charge state to MS2 charge 2 ratio 
+
+generate_scatter_plot("chargestate", QCmetricsLongMS2ChargeRatio_ALL, QCmetricsLongMS2ChargeRatio_ID, "MS2 Charge Ratio")
+
+```
+
+<a href="#top">Back to top</a>
+  
